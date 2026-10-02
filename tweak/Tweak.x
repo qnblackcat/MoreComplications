@@ -1,5 +1,12 @@
 #import <Foundation/Foundation.h>
+// roothide.h only ships with the roothide fork of Theos, so the other schemes stay on rootless.h
+#ifdef THEOS_PACKAGE_SCHEME_ROOTHIDE
+#import <roothide.h>
+#define JBROOT_NS(path) jbroot(path)
+#else
 #import <rootless.h>
+#define JBROOT_NS(path) ROOT_PATH_NS(path)
+#endif
 #import "Tweak.h"
 
 #define BUNDLE_ID @"xyz.skitty.morecomplications"
@@ -87,7 +94,7 @@ void refreshPrefs() {
 		settings = nil;
 	}
 	if (!settings) {
-		NSString *settingsPath = ROOT_PATH_NS(@"/var/mobile/Library/Preferences/");
+		NSString *settingsPath = JBROOT_NS(@"/var/mobile/Library/Preferences/");
 		settings = [[NSMutableDictionary alloc] initWithContentsOfFile:[NSString stringWithFormat:@"%@%@.plist", settingsPath, BUNDLE_ID]];
 	}
 
