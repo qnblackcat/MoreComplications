@@ -9,30 +9,17 @@ static NSMutableDictionary *settings;
 static BOOL enabled = YES;
 static int rows = 2;
 
-%hook CSGraphicComplicationLayoutProvider
-
 // allow adding more elements to the complication
-+ (bool)canAddElement:(CSComplicationLayoutElement *)element toElements:(NSArray<CSComplicationLayoutElement *> *)elements {
-	if (!enabled) return %orig;
+static BOOL canAddElementToRows(CSComplicationLayoutElement *element, NSArray<CSComplicationLayoutElement *> *elements) {
 	long long totalWidth = 0;
-	for (CSComplicationLayoutElement *element in elements) {
-		totalWidth += element.gridWidth;
+	for (CSComplicationLayoutElement *existingElement in elements) {
+		totalWidth += existingElement.gridWidth;
 	}
 	return totalWidth + element.gridWidth <= rows * ELEMENTS_PER_ROW;
 }
 
-// change the height of the complication container to fit more rows
-+ (double)complicationContainerHeight {
-	double complicationContainerHeight = %orig;
-	if (!enabled) return complicationContainerHeight;
-	double spacing = [%c(CSGraphicComplicationLayoutProvider) complicationEdgeInset];
-	return complicationContainerHeight * rows + spacing * (rows - 1);
-}
-
-// handle the positions of the complications
-+ (NSDictionary<CSComplicationLayoutElement *, NSValue *> *)_framesForLayoutElements:(NSArray<CSComplicationLayoutElement *> *)elements containerSize:(CGSize)containerSize {
-	if (!enabled) return %orig;
-
+// handle the positions of the complications, laying out each row with the original single row function
+static NSDictionary<CSComplicationLayoutElement *, NSValue *> *framesForRows(NSArray<CSComplicationLayoutElement *> *elements, CGSize containerSize, NSDictionary<CSComplicationLayoutElement *, NSValue *> *(^framesForRow)(NSArray<CSComplicationLayoutElement *> *row, CGSize rowSize)) {
 	NSMutableArray *groups = [NSMutableArray new];
 	NSMutableArray *groupWidths = [NSMutableArray new];
 	for (int i = 0; i < rows; ++i) {
@@ -64,7 +51,7 @@ static int rows = 2;
 		if ([group count] == 0) {
 			break;
 		}
-		NSDictionary<CSComplicationLayoutElement *, NSValue *> *frames = %orig(group, smallContainerSize);
+		NSDictionary<CSComplicationLayoutElement *, NSValue *> *frames = framesForRow(group, smallContainerSize);
 		for (CSComplicationLayoutElement *element in frames) {
 			NSRect frame = [frames[element] CGRectValue];
 			frame.origin.y += i * (smallContainerSize.height + spacing);
@@ -74,6 +61,60 @@ static int rows = 2;
 
 	return newFrames;
 }
+
+%hook CSGraphicComplicationLayoutProvider
+
+// change the height of the complication container to fit more rows
++ (double)complicationContainerHeight {
+	double complicationContainerHeight = %orig;
+	if (!enabled) return complicationContainerHeight;
+	double spacing = [%c(CSGraphicComplicationLayoutProvider) complicationEdgeInset];
+	return complicationContainerHeight * rows + spacing * (rows - 1);
+}
+
+%end
+
+%group iOS16
+
+%hook CSGraphicComplicationLayoutProvider
+
++ (bool)canAddElement:(CSComplicationLayoutElement *)element toElements:(NSArray<CSComplicationLayoutElement *> *)elements {
+	if (!enabled) return %orig;
+	return canAddElementToRows(element, elements);
+}
+
++ (NSDictionary<CSComplicationLayoutElement *, NSValue *> *)_framesForLayoutElements:(NSArray<CSComplicationLayoutElement *> *)elements containerSize:(CGSize)containerSize {
+	if (!enabled) return %orig;
+	return framesForRows(elements, containerSize, ^(NSArray<CSComplicationLayoutElement *> *row, CGSize rowSize) {
+		return %orig(row, rowSize);
+	});
+}
+
+%end
+
+%end
+
+// iOS 17 added a layout style so the same provider can lay out the iPad sidebar (0 is the row
+// under the clock, 1 the sidebar), and PosterKit calls these directly, so the iOS 16 methods
+// above are never reached
+%group iOS17
+
+%hook CSGraphicComplicationLayoutProvider
+
++ (bool)canAddElement:(CSComplicationLayoutElement *)element toElements:(NSArray<CSComplicationLayoutElement *> *)elements layoutStyle:(long long)layoutStyle {
+	if (!enabled || layoutStyle != 0) return %orig;
+	return canAddElementToRows(element, elements);
+}
+
+// what _framesForLayoutElements:layoutStyle:containerSize: uses for the row, so the sidebar is left alone
++ (NSDictionary<CSComplicationLayoutElement *, NSValue *> *)_rowFramesForLayoutElements:(NSArray<CSComplicationLayoutElement *> *)elements containerSize:(CGSize)containerSize {
+	if (!enabled) return %orig;
+	return framesForRows(elements, containerSize, ^(NSArray<CSComplicationLayoutElement *> *row, CGSize rowSize) {
+		return %orig(row, rowSize);
+	});
+}
+
+%end
 
 %end
 
@@ -102,4 +143,12 @@ static void PreferencesChangedCallback(CFNotificationCenterRef center, void *obs
 %ctor {
 	CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL, (CFNotificationCallback) PreferencesChangedCallback, (CFStringRef)[NSString stringWithFormat:@"%@.prefschanged", BUNDLE_ID], NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
 	refreshPrefs();
+
+	%init;
+	// pick the hooks by the methods the class actually has rather than by iOS version
+	if ([%c(CSGraphicComplicationLayoutProvider) respondsToSelector:@selector(_rowFramesForLayoutElements:containerSize:)]) {
+		%init(iOS17);
+	} else {
+		%init(iOS16);
+	}
 }

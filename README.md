@@ -1,5 +1,5 @@
 # MoreComplications
-Add more complications to your Lock Screen on iOS 16.
+Add more complications to your Lock Screen on iOS 16 and 17.
 
 ## Screenshots
 <img src="Preview.png" alt="Preview" />
