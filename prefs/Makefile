@@ -1,4 +1,4 @@
-TARGET = iphone:clang:latest:12.0 # need to set lower deployment target for skittyprefs
+TARGET = iphone:clang:16.4:12.0 # need to set lower deployment target for skittyprefs
 
 BUNDLE_NAME = MoreComplications
 MoreComplications_FILES = $(wildcard *.m) $(wildcard SkittyPrefs/*.m)
